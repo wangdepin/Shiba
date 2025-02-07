@@ -48,7 +48,7 @@ RUN /usr/local/bin/python -m pip install --upgrade pip && \
     pip install pandas==1.5.3 statsmodels==0.13.5 matplotlib==3.6.3 \
 	seaborn==0.12.2 numexpr==2.8.4 styleframe==4.1 plotly==5.13.0 dash==2.8.1 \
 	pysam==0.21.0 scanpy==1.9.5 \
-	numpy==1.26.4
+	numpy==1.26.4 PyYAML==6.0.2
 
 # Install Subread (version 2.0.3)
 RUN cd /opt_shiba && \
