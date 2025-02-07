@@ -2,6 +2,12 @@
 
 All notable changes to this Shiba project will be documented in this file.
 
+## [v0.5.2] - 2025-02-07
+
+### Fixed
+
+- Add pyYAML to the Dockerfile to fix the error in the execution of the main scripts and snakefiles.
+
 ## [v0.5.1] - 2025-01-21
 
 ### Added
