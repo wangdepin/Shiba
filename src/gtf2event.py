@@ -964,6 +964,337 @@ def ri(gtf_dic) -> list:
 
 	return(event_l)
 
+def complex_events(gtf_dic) -> list:
+    """
+    检测复杂的内部外显子事件(CO)。
+    这些是不适合其他类别的复杂事件，涉及内部外显子（不在转录本末端）。
+
+    Args:
+        gtf_dic: 包含GTF文件信息的字典。
+
+    Returns:
+        list: 复杂事件列表，每个事件包含以下信息：
+        [included_exons, excluded_exons, pre_exon, post_exon, strand, gene_id, gene_name, included_transcript, excluded_transcript]
+    """
+    event_l = []
+    for gene in gtf_dic.keys():
+        if "intron_list" not in gtf_dic[gene]:
+            continue
+        
+        strand = gtf_dic[gene]["strand"]
+        gene_name = gtf_dic[gene]["gene_name"]
+        exon_dic = gtf_dic[gene]["transcript_exon_dic"]
+        
+        # 比较所有转录本对
+        transcript_list = list(exon_dic.keys())
+        for i in range(len(transcript_list)):
+            for j in range(i+1, len(transcript_list)):
+                tx1 = transcript_list[i]
+                tx2 = transcript_list[j]
+                
+                # 获取每个转录本的外显子
+                tx1_exons = sorted(list(exon_dic[tx1]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                tx2_exons = sorted(list(exon_dic[tx2]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                
+                # 跳过没有共享外显子的转录本
+                shared_exons = set(tx1_exons) & set(tx2_exons)
+                if not shared_exons:
+                    continue
+                
+                # 找出转录本之间的差异区域
+                tx1_unique = list(set(tx1_exons) - set(tx2_exons))
+                tx2_unique = list(set(tx2_exons) - set(tx1_exons))
+                
+                # 跳过没有差异的情况
+                if not tx1_unique or not tx2_unique:
+                    continue
+                
+                # 按位置排序
+                tx1_unique = sorted(tx1_unique, key=lambda x: int(x.split(":")[1].split("-")[0]))
+                tx2_unique = sorted(tx2_unique, key=lambda x: int(x.split(":")[1].split("-")[0]))
+                
+                # 检查是否有两侧的共享外显子
+                tx1_start = min([int(x.split(":")[1].split("-")[0]) for x in tx1_unique])
+                tx1_end = max([int(x.split(":")[1].split("-")[1]) for x in tx1_unique])
+                tx2_start = min([int(x.split(":")[1].split("-")[0]) for x in tx2_unique])
+                tx2_end = max([int(x.split(":")[1].split("-")[1]) for x in tx2_unique])
+                
+                # 找到差异区域前后的共享外显子
+                pre_common = []
+                post_common = []
+                
+                min_pos = min(tx1_start, tx2_start)
+                max_pos = max(tx1_end, tx2_end)
+                
+                for exon in shared_exons:
+                    exon_end = int(exon.split(":")[1].split("-")[1])
+                    exon_start = int(exon.split(":")[1].split("-")[0])
+                    
+                    if exon_end < min_pos:
+                        pre_common.append(exon)
+                    elif exon_start > max_pos:
+                        post_common.append(exon)
+                
+                # 如果两侧都有共享外显子，认为是CO事件
+                if pre_common and post_common:
+                    # 根据外显子数量确定包含和排除形式
+                    if len(tx1_unique) > len(tx2_unique):
+                        included_exons = tx1_unique
+                        excluded_exons = tx2_unique
+                        included_transcript = tx1
+                        excluded_transcript = tx2
+                    else:
+                        included_exons = tx2_unique
+                        excluded_exons = tx1_unique
+                        included_transcript = tx2
+                        excluded_transcript = tx1
+                        
+                    # 创建事件条目
+                    exonlist_included = ";".join(included_exons)
+                    exonlist_excluded = ";".join(excluded_exons)
+                    pre_exon = max(pre_common, key=lambda x: int(x.split(":")[1].split("-")[1]))
+                    post_exon = min(post_common, key=lambda x: int(x.split(":")[1].split("-")[0]))
+                    
+                    event_l.append([
+                        exonlist_included,
+                        exonlist_excluded,
+                        pre_exon,
+                        post_exon,
+                        strand,
+                        gene,
+                        gene_name,
+                        included_transcript,
+                        excluded_transcript
+                    ])
+    
+    return event_l
+
+def complex_first_events(gtf_dic) -> list:
+    """
+    检测复杂的第一外显子事件(CF)。
+    这些是涉及转录起始位点的复杂事件。
+
+    Args:
+        gtf_dic: 包含GTF文件信息的字典。
+
+    Returns:
+        list: 复杂第一外显子事件列表，每个事件包含以下信息：
+        [included_exons, excluded_exons, post_exon, strand, gene_id, gene_name, included_transcript, excluded_transcript]
+    """
+    event_l = []
+    for gene in gtf_dic.keys():
+        if "intron_list" not in gtf_dic[gene]:
+            continue
+        
+        strand = gtf_dic[gene]["strand"]
+        gene_name = gtf_dic[gene]["gene_name"]
+        exon_dic = gtf_dic[gene]["transcript_exon_dic"]
+        
+        # 比较所有转录本对
+        transcript_list = list(exon_dic.keys())
+        for i in range(len(transcript_list)):
+            for j in range(i+1, len(transcript_list)):
+                tx1 = transcript_list[i]
+                tx2 = transcript_list[j]
+                
+                # 根据链的方向获取排序的外显子
+                if strand == "+":
+                    tx1_exons = sorted(list(exon_dic[tx1]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                    tx2_exons = sorted(list(exon_dic[tx2]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                else:  # strand == "-"
+                    tx1_exons = sorted(list(exon_dic[tx1]), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                    tx2_exons = sorted(list(exon_dic[tx2]), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                
+                # 获取第一个外显子
+                tx1_first = tx1_exons[0] if tx1_exons else None
+                tx2_first = tx2_exons[0] if tx2_exons else None
+                
+                # 跳过没有外显子的转录本
+                if not tx1_first or not tx2_first:
+                    continue
+                
+                # 跳过第一个外显子相同的情况
+                if tx1_first == tx2_first:
+                    continue
+                
+                # 找到共享外显子
+                shared_exons = set(tx1_exons) & set(tx2_exons)
+                if not shared_exons:
+                    continue
+                
+                # 找到第一个共享外显子
+                if strand == "+":
+                    shared_sorted = sorted(list(shared_exons), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                else:  # strand == "-"
+                    shared_sorted = sorted(list(shared_exons), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                
+                post_common = shared_sorted[0] if shared_sorted else None
+                if not post_common:
+                    continue
+                
+                # 获取第一个共享外显子之前的唯一外显子
+                tx1_unique = []
+                tx2_unique = []
+                
+                for exon in tx1_exons:
+                    if exon in shared_exons:
+                        break
+                    tx1_unique.append(exon)
+                
+                for exon in tx2_exons:
+                    if exon in shared_exons:
+                        break
+                    tx2_unique.append(exon)
+                
+                # 跳过任一转录本没有唯一外显子的情况
+                if not tx1_unique or not tx2_unique:
+                    continue
+                
+                # 根据外显子数量确定包含和排除形式
+                if len(tx1_unique) > len(tx2_unique):
+                    included_exons = tx1_unique
+                    excluded_exons = tx2_unique
+                    included_transcript = tx1
+                    excluded_transcript = tx2
+                else:
+                    included_exons = tx2_unique
+                    excluded_exons = tx1_unique
+                    included_transcript = tx2
+                    excluded_transcript = tx1
+                    
+                # 创建事件条目
+                exonlist_included = ";".join(included_exons)
+                exonlist_excluded = ";".join(excluded_exons)
+                
+                event_l.append([
+                    exonlist_included,
+                    exonlist_excluded,
+                    post_common,
+                    strand,
+                    gene,
+                    gene_name,
+                    included_transcript,
+                    excluded_transcript
+                ])
+    
+    return event_l
+
+def complex_last_events(gtf_dic) -> list:
+    """
+    检测复杂的最后外显子事件(CL)。
+    这些是涉及转录终止位点的复杂事件。
+
+    Args:
+        gtf_dic: 包含GTF文件信息的字典。
+
+    Returns:
+        list: 复杂最后外显子事件列表，每个事件包含以下信息：
+        [included_exons, excluded_exons, pre_exon, strand, gene_id, gene_name, included_transcript, excluded_transcript]
+    """
+    event_l = []
+    for gene in gtf_dic.keys():
+        if "intron_list" not in gtf_dic[gene]:
+            continue
+        
+        strand = gtf_dic[gene]["strand"]
+        gene_name = gtf_dic[gene]["gene_name"]
+        exon_dic = gtf_dic[gene]["transcript_exon_dic"]
+        
+        # 比较所有转录本对
+        transcript_list = list(exon_dic.keys())
+        for i in range(len(transcript_list)):
+            for j in range(i+1, len(transcript_list)):
+                tx1 = transcript_list[i]
+                tx2 = transcript_list[j]
+                
+                # 根据链的方向获取排序的外显子
+                if strand == "+":
+                    tx1_exons = sorted(list(exon_dic[tx1]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                    tx2_exons = sorted(list(exon_dic[tx2]), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                else:  # strand == "-"
+                    tx1_exons = sorted(list(exon_dic[tx1]), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                    tx2_exons = sorted(list(exon_dic[tx2]), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                
+                # 获取最后一个外显子
+                tx1_last = tx1_exons[-1] if tx1_exons else None
+                tx2_last = tx2_exons[-1] if tx2_exons else None
+                
+                # 跳过没有外显子的转录本
+                if not tx1_last or not tx2_last:
+                    continue
+                
+                # 跳过最后一个外显子相同的情况
+                if tx1_last == tx2_last:
+                    continue
+                
+                # 找到共享外显子
+                shared_exons = set(tx1_exons) & set(tx2_exons)
+                if not shared_exons:
+                    continue
+                
+                # 找到最后一个共享外显子
+                if strand == "+":
+                    shared_sorted = sorted(list(shared_exons), key=lambda x: int(x.split(":")[1].split("-")[0]), reverse=True)
+                else:  # strand == "-"
+                    shared_sorted = sorted(list(shared_exons), key=lambda x: int(x.split(":")[1].split("-")[0]))
+                
+                pre_common = shared_sorted[0] if shared_sorted else None
+                if not pre_common:
+                    continue
+                
+                # 获取最后一个共享外显子之后的唯一外显子
+                tx1_unique = []
+                tx2_unique = []
+                
+                found_shared = False
+                for exon in reversed(tx1_exons):
+                    if not found_shared and exon in shared_exons:
+                        found_shared = True
+                        continue
+                    if found_shared:
+                        tx1_unique.append(exon)
+                
+                found_shared = False
+                for exon in reversed(tx2_exons):
+                    if not found_shared and exon in shared_exons:
+                        found_shared = True
+                        continue
+                    if found_shared:
+                        tx2_unique.append(exon)
+                
+                # 跳过任一转录本没有唯一外显子的情况
+                if not tx1_unique or not tx2_unique:
+                    continue
+                
+                # 根据外显子数量确定包含和排除形式
+                if len(tx1_unique) > len(tx2_unique):
+                    included_exons = tx1_unique
+                    excluded_exons = tx2_unique
+                    included_transcript = tx1
+                    excluded_transcript = tx2
+                else:
+                    included_exons = tx2_unique
+                    excluded_exons = tx1_unique
+                    included_transcript = tx2
+                    excluded_transcript = tx1
+                    
+                # 创建事件条目
+                exonlist_included = ";".join(included_exons)
+                exonlist_excluded = ";".join(excluded_exons)
+                
+                event_l.append([
+                    exonlist_included,
+                    exonlist_excluded,
+                    pre_common,
+                    strand,
+                    gene,
+                    gene_name,
+                    included_transcript,
+                    excluded_transcript
+                ])
+    
+    return event_l
+
 def main():
 	## Main
 
@@ -1307,6 +1638,115 @@ def main():
 	del output_df
 
 	logger.info("Alternative last exons search completed.")
+
+	#################################### Complex events (CO) ####################################
+
+	logger.info("Searching complex events (CO)....")
+	with concurrent.futures.ProcessPoolExecutor(max_workers=num_process) as executor:
+		futures = [executor.submit(complex_events, gtf_dic_split[i]) for i in range(num_process)]
+	output_l = []
+	logger.debug("Waiting for complex events search to complete....")
+	for future in concurrent.futures.as_completed(futures):
+		output_l += future.result()
+	output_df = pd.DataFrame(
+		output_l,
+		columns = ["included_exons", "excluded_exons", "pre_exon", "post_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]
+	)
+
+	logger.debug("Creating event_id....")
+	output_df["pos_id"] = \
+		"CO@" + \
+		output_df["pre_exon"].str.split(":", expand = True)[0].astype(str) + "@" + \
+		output_df["pre_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[0].astype(str) + "-" + output_df["pre_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[1].astype(str) + "@" + \
+		output_df["post_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[0].astype(str) + "-" + output_df["post_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[1].astype(str)
+	output_df = output_df.sort_values("included_exons")
+	output_df = output_df.drop_duplicates(subset = "pos_id", keep = "first")
+	output_df = output_df.reset_index()
+	output_df["event_id_num"] = output_df.index + 1
+	output_df["event_id"] = "CO_" + output_df["event_id_num"].astype(str)
+	output_df = output_df[["event_id", "pos_id", "included_exons", "excluded_exons", "pre_exon", "post_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]]
+
+	logger.debug("Creating label....")
+	if reference_gtf_path:
+		output_df["label"] = "unannotated"  # 复杂事件默认为未注释
+	else:
+		output_df["label"] = "annotated"
+	output_df_dict["CO"] = output_df
+	del output_df
+
+	logger.info("Complex events search completed.")
+
+	#################################### Complex first events (CF) ####################################
+
+	logger.info("Searching complex first events (CF)....")
+	with concurrent.futures.ProcessPoolExecutor(max_workers=num_process) as executor:
+		futures = [executor.submit(complex_first_events, gtf_dic_split[i]) for i in range(num_process)]
+	output_l = []
+	logger.debug("Waiting for complex first events search to complete....")
+	for future in concurrent.futures.as_completed(futures):
+		output_l += future.result()
+	output_df = pd.DataFrame(
+		output_l,
+		columns = ["included_exons", "excluded_exons", "post_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]
+	)
+
+	logger.debug("Creating event_id....")
+	output_df["pos_id"] = \
+		"CF@" + \
+		output_df["post_exon"].str.split(":", expand = True)[0].astype(str) + "@" + \
+		output_df["post_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[0].astype(str) + "-" + output_df["post_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[1].astype(str)
+	output_df = output_df.sort_values("included_exons")
+	output_df = output_df.drop_duplicates(subset = "pos_id", keep = "first")
+	output_df = output_df.reset_index()
+	output_df["event_id_num"] = output_df.index + 1
+	output_df["event_id"] = "CF_" + output_df["event_id_num"].astype(str)
+	output_df = output_df[["event_id", "pos_id", "included_exons", "excluded_exons", "post_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]]
+
+	logger.debug("Creating label....")
+	if reference_gtf_path:
+		output_df["label"] = "unannotated"  # 复杂事件默认为未注释
+	else:
+		output_df["label"] = "annotated"
+	output_df_dict["CF"] = output_df
+	del output_df
+
+	logger.info("Complex first events search completed.")
+
+	#################################### Complex last events (CL) ####################################
+
+	logger.info("Searching complex last events (CL)....")
+	with concurrent.futures.ProcessPoolExecutor(max_workers=num_process) as executor:
+		futures = [executor.submit(complex_last_events, gtf_dic_split[i]) for i in range(num_process)]
+	output_l = []
+	logger.debug("Waiting for complex last events search to complete....")
+	for future in concurrent.futures.as_completed(futures):
+		output_l += future.result()
+	output_df = pd.DataFrame(
+		output_l,
+		columns = ["included_exons", "excluded_exons", "pre_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]
+	)
+
+	logger.debug("Creating event_id....")
+	output_df["pos_id"] = \
+		"CL@" + \
+		output_df["pre_exon"].str.split(":", expand = True)[0].astype(str) + "@" + \
+		output_df["pre_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[0].astype(str) + "-" + output_df["pre_exon"].str.split(":", expand = True)[1].str.split("-", expand = True)[1].astype(str)
+	output_df = output_df.sort_values("included_exons")
+	output_df = output_df.drop_duplicates(subset = "pos_id", keep = "first")
+	output_df = output_df.reset_index()
+	output_df["event_id_num"] = output_df.index + 1
+	output_df["event_id"] = "CL_" + output_df["event_id_num"].astype(str)
+	output_df = output_df[["event_id", "pos_id", "included_exons", "excluded_exons", "pre_exon", "strand", "gene_id", "gene_name", "included_transcript", "excluded_transcript"]]
+
+	logger.debug("Creating label....")
+	if reference_gtf_path:
+		output_df["label"] = "unannotated"  # 复杂事件默认为未注释
+	else:
+		output_df["label"] = "annotated"
+	output_df_dict["CL"] = output_df
+	del output_df
+
+	logger.info("Complex last events search completed.")
 
 	#################################### Event search end #########################################
 
